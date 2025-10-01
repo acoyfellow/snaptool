@@ -26,7 +26,7 @@ jobs:
         run: |
           cd container
           docker build -t snaptool-bun-compiler .
-          wrangler containers deploy --config deploy.toml
+          wrangler containers push --config deploy.toml
         env:
           CLOUDFLARE_EMAIL: ${{ secrets.CLOUDFLARE_EMAIL }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
