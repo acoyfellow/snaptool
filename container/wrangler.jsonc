@@ -1,0 +1,19 @@
+{
+  "name": "snaptool-container",
+  "compatibility_date": "2025-10-01",
+  "containers": [
+    {
+      "name": "bun-compiler",
+      "image": "./Dockerfile",
+      "services": [
+        {
+          "name": "compile",
+          "internal_port": 3000
+        }
+      ]
+    }
+  ],
+  "env": {
+    "NODE_ENV": "production"
+  }
+}
