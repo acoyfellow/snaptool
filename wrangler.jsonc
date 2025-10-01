@@ -11,6 +11,10 @@
       {
         "name": "PROMPTS",
         "class_name": "PromptLog"
+      },
+      {
+        "name": "BUN_COMPILER_DO",
+        "class_name": "BunCompiler"
       }
     ]
   },
@@ -18,6 +22,10 @@
     {
       "tag": "v1",
       "new_classes": ["PromptLog"]
+    },
+    {
+      "tag": "v2",
+      "new_sqlite_classes": ["BunCompiler"]
     }
   ],
   "worker_loaders": [
@@ -31,10 +39,11 @@
       "bucket_name": "snaptool-tools"
     }
   ],
-  "services": [
+  "containers": [
     {
-      "binding": "BUN_COMPILER",
-      "service": "bun-compiler"
+      "name": "bun-compiler",
+      "class_name": "BunCompiler",
+      "image": "./container/Dockerfile"
     }
   ]
 }

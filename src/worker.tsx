@@ -6,6 +6,7 @@ import { createOpenAI } from "@ai-sdk/openai";
 import { z } from "zod";
 import { Effect } from "effect";
 import { generateWithRetry, searchNpmPackages } from "./utils/external-api";
+import { DurableObject } from "cloudflare:workers";
 
 import type { Cloudflare } from "cloudflare:workers";
 import { PromptLog } from "./do";
@@ -886,6 +887,26 @@ app.post("/api/tools/execute", async (c) => {
     }, { status: 500 });
   }
 });
+
+export class BunCompiler extends DurableObject<Cloudflare.Env> {
+  container: globalThis.Container;
+
+  constructor(ctx: DurableObjectState, env: Cloudflare.Env) {
+    super(ctx, env);
+    this.container = ctx.container!;
+    void this.ctx.blockConcurrencyWhile(async () => {
+      if (!this.container.running) this.container.start();
+    });
+  }
+
+  async fetch(req: Request): Promise<Response> {
+    try {
+      return await this.container.getTcpPort(3000).fetch(req.url.replace('https:', 'http:'), req);
+    } catch (err: any) {
+      return new Response(`${this.ctx.id.toString()}: ${err.message}`, { status: 500 });
+    }
+  }
+}
 
 export default {
   fetch: app.fetch,
