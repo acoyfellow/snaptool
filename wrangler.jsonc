@@ -1,0 +1,40 @@
+{
+  "name": "snaptool",
+  "main": "src/worker.tsx",
+  "compatibility_date": "2025-10-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "vars": {
+    "BUN_COMPILER_LOCALHOST": true
+  },
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "PROMPTS",
+        "class_name": "PromptLog"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_classes": ["PromptLog"]
+    }
+  ],
+  "worker_loaders": [
+    {
+      "binding": "LOADER"
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "TOOL_CACHE",
+      "bucket_name": "snaptool-tools"
+    }
+  ],
+  "services": [
+    {
+      "binding": "BUN_COMPILER",
+      "service": "bun-compiler"
+    }
+  ]
+}
