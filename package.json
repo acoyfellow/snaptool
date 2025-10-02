@@ -1,24 +1,27 @@
 {
-  "name": "snaptool",
+  "name": "anytool",
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "wrangler dev",
-    "deploy": "wrangler deploy",
-    "deploy:all": "wrangler deploy"
+    "dev:alchemy": "alchemy dev",
+    "deploy:alchemy": "alchemy deploy",
+    "dev": "npx wrangler dev",
+    "deploy": "npx wrangler deploy"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20251001.0",
+    "alchemy": "^0.70.0",
     "bun-types": "^1.2.23",
     "hono": "^4.9.9",
     "typescript": "^5.9.3",
-    "wrangler": "^4.40.3"
+    "wrangler": "^4.41.0"
   },
   "dependencies": {
     "@ai-sdk/openai": "^2.0.42",
     "ai": "^5.0.59",
     "effect": "^3.18.1",
-    "modern-tar": "^0.3.4",
+    "marked": "^16.3.0",
+    "modern-tar": "^0.3.5",
     "zod": "^4.1.11"
   }
 }

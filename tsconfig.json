@@ -12,5 +12,5 @@
     "types": ["@cloudflare/workers-types", "./src/env.d.ts"],
     "noEmit": true
   },
-  "include": ["src"]
+  "include": ["src", "src_new"]
 }

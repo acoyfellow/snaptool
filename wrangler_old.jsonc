@@ -1,12 +1,8 @@
 {
-  "name": "anytool",
-  "main": "src/worker.tsx",
+  "name": "snaptool-v2",
+  "main": "src_new/worker.ts",
   "compatibility_date": "2025-10-01",
   "compatibility_flags": ["nodejs_compat"],
-
-  "vars": {
-    "ENV": "development"
-  },
 
   "durable_objects": {
     "bindings": [
@@ -24,14 +20,6 @@
     }
   ],
 
-  "containers": [
-    {
-      "name": "bun-compiler",
-      "class_name": "BunCompiler",
-      "image": "./container/Dockerfile"
-    }
-  ],
-
   "worker_loaders": [
     {
       "binding": "LOADER"
@@ -41,7 +29,15 @@
   "r2_buckets": [
     {
       "binding": "TOOL_CACHE",
-      "bucket_name": "anytool-tools"
+      "bucket_name": "snaptool-tools"
+    }
+  ],
+
+  "containers": [
+    {
+      "name": "bun-compiler",
+      "class_name": "BunCompiler",
+      "image": "./container/Dockerfile"
     }
   ]
 }

@@ -4,17 +4,79 @@ import { html } from "hono/html";
 import { generateObject } from "ai";
 import { createOpenAI } from "@ai-sdk/openai";
 import { z } from "zod";
-import { Effect } from "effect";
-import { generateWithRetry, searchNpmPackages } from "./utils/external-api";
+
 import { DurableObject } from "cloudflare:workers";
+import type { R2Bucket, Cloudflare } from "cloudflare:workers";
+import { marked } from 'marked';
 
-import type { Cloudflare } from "cloudflare:workers";
-import { PromptLog } from "./do";
-import { hashPrompt } from "./utils/hash";
-import { R2ToolCache } from "./utils/r2-cache";
-import { compileWithBun, compileManually } from "./utils/compiler";
+// README content (you can replace this with the actual content)
+const readmeContent = `# Anytool: Infinite Tools Without the Context Bloat
 
-export { PromptLog };
+**One Tool To Rule Them All** - Transform any natural language description into a working, cached, executable tool that returns the perfect content type.
+
+## The Core Value Proposition
+
+Instead of building and maintaining hundreds of individual tools for AI agents, you give them **one universal tool** that can generate any other tool on-demand.
+
+**Traditional Approach:**
+- Build 50+ individual tools (UUID generator, QR code maker, password checker, etc.)
+- Maintain each tool separately
+- Hand over a massive tool list to your AI agent
+- Each tool has fixed functionality
+
+**Anytool Approach:**
+- Build **one universal tool** that generates others
+- AI describes what it needs: "Create a QR code generator that returns SVG"
+- Tool is generated, compiled, cached, and executed instantly
+- Same prompt = instant cached response (~50ms)
+- **Infinite tools from one tool**
+
+## What Makes This Revolutionary
+
+### **Dynamic Content Type Intelligence**
+Anytool doesn't just generate code - it understands what type of response you need and handles it perfectly:
+
+- "Create a QR code generator" → Returns SVG with proper headers
+- "Build a password checker" → Returns JSON with strength analysis
+- "Make an image resizer" → Returns base64 PNG data
+- "Create a CSV parser" → Returns formatted HTML table
+
+### **Smart Response Handling**
+The system automatically:
+1. **Detects output type** from the AI-generated tool (image, json, html, svg, csv, etc.)
+2. **Sets proper headers** in the generated Worker
+3. **Renders appropriately** in the UI (images display, JSON formats, CSV becomes tables)
+4. **Caches everything** so repeat requests are instant
+
+## Quick Start
+
+\`\`\`bash
+# Install dependencies
+bun install
+
+# Start development server
+bun dev
+
+# Visit http://localhost:8787
+\`\`\`
+
+## Example Prompts to Try
+
+### **Text & Data Tools**
+- "Make a UUID generator using the uuid package"
+- "Create a password strength meter using zxcvbn"
+- "Build a JWT token decoder that validates claims"
+- "Create a markdown to HTML converter using marked"
+
+### **Visual Tools**
+- "Create a QR code generator that returns SVG"
+- "Build a QR code generator that outputs PNG images"
+- "Make a simple chart generator that returns SVG"
+
+### **Data Processing**
+- "Create a CSV parser that returns formatted HTML tables"
+- "Build a JSON validator and formatter"
+- "Make a URL shortener with analytics"`;
 
 const app = new Hono<{ Bindings: Cloudflare.Env }>();
 
@@ -26,7 +88,7 @@ app.use(
         <head>
           <meta charset="utf-8" />
           <meta name="viewport" content="width=device-width, initial-scale=1" />
-          <title>SnapTool</title>
+          <title>Anytool</title>
           <script src="https://cdn.tailwindcss.com"></script>
           <link rel="preconnect" href="https://fonts.googleapis.com">
           <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -34,6 +96,84 @@ app.use(
           <style>
             *{
               font-family: "Google Sans Code", monospace;
+            }
+            .prose h1 {
+              font-size: 1.5rem;
+              font-weight: bold;
+              margin-top: 1.5rem;
+              margin-bottom: 1rem;
+              color: #ffffff;
+            }
+            .prose h2 {
+              font-size: 1.25rem;
+              font-weight: bold;
+              margin-top: 1.5rem;
+              margin-bottom: 0.75rem;
+              color: #60a5fa;
+            }
+            .prose h3 {
+              font-size: 1.125rem;
+              font-weight: bold;
+              margin-top: 1rem;
+              margin-bottom: 0.5rem;
+              color: #93c5fd;
+            }
+            .prose p {
+              margin-bottom: 0.75rem;
+              color: #d1d5db;
+            }
+            .prose pre {
+              background-color: #111827;
+              padding: 0.75rem;
+              border-radius: 0.375rem;
+              overflow-x: auto;
+              color: #d1d5db;
+            }
+            .prose code {
+              background-color: #374151;
+              padding: 0.125rem 0.25rem;
+              border-radius: 0.25rem;
+              font-size: 0.875rem;
+              color: #d1d5db;
+            }
+            .prose strong {
+              color: #ffffff;
+              font-weight: bold;
+            }
+            .prose table {
+              width: 100%;
+              border-collapse: collapse;
+              border: 1px solid #4b5563;
+              margin-top: 1rem;
+              margin-bottom: 1rem;
+            }
+            .prose th, .prose td {
+              border: 1px solid #4b5563;
+              padding: 0.5rem;
+            }
+            .prose th {
+              background-color: #1f2937;
+              font-weight: bold;
+              color: #ffffff;
+            }
+            .prose td {
+              color: #d1d5db;
+            }
+            .prose ul {
+              margin-left: 1rem;
+              margin-top: 0.5rem;
+              margin-bottom: 0.5rem;
+            }
+            .prose li {
+              color: #d1d5db;
+              margin-bottom: 0.25rem;
+            }
+            .prose blockquote {
+              border-left: 4px solid #4b5563;
+              padding-left: 1rem;
+              margin: 1rem 0;
+              color: #9ca3af;
+              font-style: italic;
             }
           </style>
         </head>
@@ -44,587 +184,193 @@ app.use(
   )
 );
 
-const examples = [
-  "Make a UUID generator using the uuid package",
-  "Create a markdown to HTML converter using marked",
-  "Build a QR code generator that outputs PNG images using qrcode package",
-  "Make a JWT token decoder that validates claims using jsonwebtoken",
-  "Build a password strength meter using zxcvbn that scores passwords",
-  "Create a fake person generator using faker.js with name, email, address",
-  "Build a live Bitcoin price API to fetch from CoinGecko",
-  "Make a URL slug generator using slugify package",
-  "Create a password hash checker using bcryptjs",
-  "Build a color palette generator using chroma-js for harmonious colors",
-  "Make a JSON validator and formatter using ajv schema validation",
-  "Create a text sentiment analyzer using sentiment analysis package"
-];
+// Simple hash function
+async function hashPrompt(prompt: string): Promise<string> {
+  const encoder = new TextEncoder();
+  const data = encoder.encode(prompt.trim().toLowerCase());
+  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+}
 
-app.get("/", (c) => {
-  return c.render(
-    <div className="min-h-screen bg-slate-900 text-slate-100">
-      <main className="mx-auto max-w-3xl py-10 px-6">
+// Tool interface
+interface CachedTool {
+  hash: string;
+  bundledCode: string;
+  createdAt: number;
+  packages: string[];
+  outputType: string;
+  outputDescription: string;
+}
 
-        {/* State 1: Describe */}
-        <div id="state-describe" className="transition-all duration-500">
-          <h1 className="text-2xl font-semibold mb-4">SnapTool
-            <small className="text-sm text-slate-300 block">a Dynamic Tool Generator</small>
-          </h1>
-          <p className="text-sm text-slate-300 mb-6">
-            Describe what you want to build, and AI will generate a custom tool instantly. A simple Worker Loaders (CF) demo.
-          </p>
+// Simple R2 cache
+class ToolCache {
+  constructor(private r2: R2Bucket) { }
 
-          <details className="mb-6 p-4 bg-slate-800 rounded-lg" open>
-            <summary className="cursor-pointer text-emerald-400 font-semibold mb-3">Example prompts</summary>
-            <div className="space-y-2 text-sm">
-              {examples.map((p) => (
-                <button
-                  className="block w-full text-left p-2 bg-slate-900 rounded text-xs hover:bg-slate-800 transition-colors"
-                  type="button"
-                  onclick={`setPrompt('${p}')`}>
-                  {p}
-                </button>
-              ))}
-            </div>
-          </details>
-
-          <div className="space-y-4">
-            <textarea
-              id="prompt-input"
-              rows={4}
-              className="w-full rounded-lg bg-slate-900 border border-slate-800 p-3 text-sm focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-colors"
-              placeholder="Create a tool that takes a list of URLs and checks if they're valid..."
-            />
-            <button onclick="generate()" className="w-full px-4 py-3 bg-emerald-500 text-slate-900 font-semibold rounded-lg hover:bg-emerald-400 transition-colors">
-              Generate Tool
-            </button>
-          </div>
-
-          <div className="flex gap-3 mt-6">
-            
-            <a href="/recent" className="flex-1 px-4 py-2 bg-slate-600 text-slate-200 font-semibold rounded-lg hover:bg-slate-500 transition-colors text-center">
-              History
-            </a>
-          </div>
-        </div>
-
-        {/* State 2: Generate & Test */}
-        <div id="state-generate" className="hidden transition-all duration-500">
-          <div className="flex justify-start items-center gap-3 mb-6">
-            <button onclick="goBack()" className="text-emerald-400 hover:text-emerald-300 transition-colors">← Back</button>
-            <h2 className="text-xl font-semibold">Your Tool</h2>
-          </div>
-
-          <div className="bg-slate-800 rounded-lg p-4 mb-6">
-            <p id="current-prompt" className="text-slate-200"></p>
-          </div>
-
-          <div className="grid grid-cols-1 gap-6">
-            {/* Code Column */}
-            <div>
-              <h3 className="text-lg font-semibold mb-3">Generated Code</h3>
-              <div className="bg-slate-900 border border-slate-800 rounded-lg overflow-hidden">
-                <div className="text-xs text-slate-400 px-3 py-2 border-b border-slate-700 bg-slate-950">
-                  TypeScript Worker Code
-                </div>
-                <pre id="generated-code" className="text-sm text-green-400 whitespace-pre-wrap h-64 p-4 overflow-y-auto">
-                  <span className="text-slate-500">Generating code...</span>
-                </pre>
-              </div>
-            </div>
-
-            {/* Test Column */}
-            <div>
-              <h3 className="text-lg font-semibold mb-3">Test & Results</h3>
-              <div className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-slate-200 mb-2">
-                    Test Input:
-                  </label>
-                  <textarea
-                    id="test-input"
-                    rows={3}
-                    className="w-full rounded-lg bg-slate-900 border border-slate-800 p-3 text-sm focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-colors"
-                    placeholder="Test data will auto-populate..."
-                  />
-                </div>
-
-                <button id="execute-button" onclick="execute()" className="w-full px-4 py-3 bg-emerald-500 text-slate-900 font-semibold rounded-lg hover:bg-emerald-400 transition-colors opacity-50 cursor-not-allowed" disabled>
-                  Execute Tool
-                </button>
-
-                <div id="result-container" className="hidden">
-                  <div className="bg-slate-800 rounded-lg overflow-hidden">
-                    <div id="result-header" className="text-xs text-slate-400 px-3 py-2 border-b border-slate-700 bg-slate-950"></div>
-                    <pre id="result-content" className="p-4 overflow-x-auto whitespace-pre-wrap text-sm text-slate-100 max-h-32"></pre>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div className="flex gap-3 mt-6">
-            <button onclick="restart()" className="flex-1 px-4 py-2 bg-slate-700 text-slate-200 font-semibold rounded-lg hover:bg-slate-600 transition-colors">
-              New Tool
-            </button>
-            <a href="/recent" className="flex-1 px-4 py-2 bg-slate-600 text-slate-200 font-semibold rounded-lg hover:bg-slate-500 transition-colors text-center">
-              History
-            </a>
-          </div>
-        </div>
-
-        <script dangerouslySetInnerHTML={{__html: `
-          let currentPrompt = '';
-          let generatedCode = '';
-
-          function setPrompt(prompt) {
-            document.getElementById('prompt-input').value = prompt;
-          }
-
-          function generate() {
-            const prompt = document.getElementById('prompt-input').value.trim();
-            if (!prompt){
-              alert("Please enter a prompt");
-              return
-            };
-
-            currentPrompt = prompt;
-            document.getElementById('current-prompt').textContent = prompt;
-
-            // Clear previous state and show loading
-            document.getElementById('generated-code').innerHTML = '<span class="text-slate-500">Generating code...</span>';
-            document.getElementById('test-input').value = '';
-            document.getElementById('result-container').classList.add('hidden');
-            generatedCode = '';
-
-            // Disable all interactive elements during loading
-            const generateBtn = document.querySelector('button[onclick="generate()"]');
-            const executeBtn = document.getElementById('execute-button');
-            const testInput = document.getElementById('test-input');
-
-            generateBtn.disabled = true;
-            generateBtn.classList.add('opacity-50', 'cursor-not-allowed');
-            executeBtn.disabled = true;
-            executeBtn.classList.add('opacity-50', 'cursor-not-allowed');
-            testInput.disabled = true;
-            testInput.classList.add('opacity-50');
-
-            // Store prompt
-            fetch('/api/store-prompt', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ prompt })
-            }).catch(() => {});
-
-            // Transition to generate state
-            document.getElementById('state-describe').classList.add('hidden');
-            document.getElementById('state-generate').classList.remove('hidden');
-
-            // Generate code
-            fetch('/api/generate-code', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ prompt })
-            })
-            .then(response => response.json())
-            .then(result => {
-              generatedCode = result.typescript;
-              document.getElementById('generated-code').textContent = result.typescript;
-
-              // Pre-populate test input with the example
-              document.getElementById('test-input').value = result.example;
-
-              // Re-enable all elements
-              generateBtn.disabled = false;
-              generateBtn.classList.remove('opacity-50', 'cursor-not-allowed');
-              executeBtn.disabled = false;
-              executeBtn.classList.remove('opacity-50', 'cursor-not-allowed');
-              testInput.disabled = false;
-              testInput.classList.remove('opacity-50');
-            })
-            .catch(error => {
-              document.getElementById('generated-code').innerHTML = \`<div class="text-red-400">Error: \${error.message}</div><button onclick="generate()" class="mt-3 px-3 py-1 bg-red-500 text-white text-sm rounded hover:bg-red-600">Retry</button>\`;
-              document.getElementById('generated-code').className = 'text-sm whitespace-pre-wrap h-64 p-4 overflow-y-auto';
-
-              // Re-enable form elements even on error
-              generateBtn.disabled = false;
-              generateBtn.classList.remove('opacity-50', 'cursor-not-allowed');
-              testInput.disabled = false;
-              testInput.classList.remove('opacity-50');
-            });
-          }
-
-          function execute() {
-            const input = document.getElementById('test-input').value || currentPrompt;
-            const executeBtn = document.getElementById('execute-button');
-
-            // Disable button during execution
-            executeBtn.disabled = true;
-            executeBtn.classList.add('opacity-50', 'cursor-not-allowed');
-            executeBtn.textContent = 'Executing...';
-
-            fetch('/api/execute-tool', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ code: generatedCode, input, prompt: currentPrompt })
-            })
-            .then(response => response.json())
-            .then(result => {
-              document.getElementById('result-header').textContent = 'Content-Type: ' + (result.contentType || 'text/plain');
-              document.getElementById('result-content').textContent = result.output;
-              document.getElementById('result-container').classList.remove('hidden');
-            })
-            .catch(error => {
-              document.getElementById('result-header').textContent = 'Execution Error';
-              document.getElementById('result-content').innerHTML = \`<div class="text-red-400">Error: \${error.message}</div><button onclick="generate()" class="mt-3 px-3 py-1 bg-red-500 text-white text-sm rounded hover:bg-red-600">Regenerate Code</button>\`;
-              document.getElementById('result-container').classList.remove('hidden');
-            })
-            .finally(() => {
-              // Re-enable button after execution
-              executeBtn.disabled = false;
-              executeBtn.classList.remove('opacity-50', 'cursor-not-allowed');
-              executeBtn.textContent = 'Execute Tool';
-            });
-          }
-
-          function goBack() {
-            document.getElementById('state-generate').classList.add('hidden');
-            document.getElementById('state-describe').classList.remove('hidden');
-          }
-
-          function restart() {
-            document.getElementById('state-generate').classList.add('hidden');
-            document.getElementById('state-describe').classList.remove('hidden');
-            document.getElementById('prompt-input').value = '';
-            document.getElementById('result-container').classList.add('hidden');
-          }
-
-          // Load prompt from session storage
-          const loadPrompt = sessionStorage.getItem('loadPrompt');
-          if (loadPrompt) {
-            document.getElementById('prompt-input').value = loadPrompt;
-            sessionStorage.removeItem('loadPrompt');
-          }
-        `}} />
-      </main>
-    </div>
-  );
-});
-
-app.get("/recent", async (c) => {
-  const id = c.env.PROMPTS.idFromName("history");
-  const stub = c.env.PROMPTS.get(id);
-  const res = await stub.fetch(new URL("/list", "http://do").toString());
-  const recent: string[] = await res.json();
-  return c.render(
-    <div className="min-h-screen bg-slate-900 text-slate-100">
-      <main className="mx-auto max-w-3xl py-10 px-6">
-        <div className="flex justify-between items-center mb-4">
-          <h2 className="text-xl font-semibold">Recent prompts</h2>
-          <button
-            onClick="clearPrompts()"
-            className="px-3 py-1 bg-red-500 text-white text-sm rounded hover:bg-red-600"
-          >
-            Clear All
-          </button>
-        </div>
-        <ul className="space-y-2">
-          {recent.length === 0 && (<small className="text-slate-300">
-            No prompts yet
-          </small>)}
-          {recent.map((p, i) => (
-            <li key={i} className="group">
-              <button
-                onClick={`loadPrompt('${p.replace(/'/g, "\\'")}')`}
-                className="w-full text-left p-3 text-sm text-slate-300 whitespace-pre-wrap break-words border border-slate-800 rounded hover:border-slate-600 hover:bg-slate-800 transition-colors cursor-pointer"
-              >
-                {p || "(no prompt)"}
-              </button>
-            </li>
-          ))}
-        </ul>
-        <div className="mt-6">
-          <a href="/" className="text-emerald-400 underline">Back</a>
-        </div>
-        <script dangerouslySetInnerHTML={{__html: `
-          function clearPrompts() {
-            if (confirm('Clear all prompts?')) {
-              fetch('/clear', { method: 'DELETE' })
-                .then(() => location.reload());
-            }
-          }
-          function loadPrompt(prompt) {
-            sessionStorage.setItem('loadPrompt', prompt);
-            window.location.href = '/';
-          }
-        `}} />
-      </main>
-    </div>
-  );
-});
-
-app.delete("/clear", async (c) => {
-  // Clear history
-  const historyId = c.env.PROMPTS.idFromName("history");
-  const historyStub = c.env.PROMPTS.get(historyId);
-
-  // Get all prompts to clear their caches
-  const res = await historyStub.fetch(new URL("/list", "http://do").toString());
-  const prompts: string[] = await res.json();
-
-  // Clear each prompt's cached data
-  const cache = new R2ToolCache(c.env.TOOL_CACHE);
-  for (const prompt of prompts) {
-    const promptHash = await hashPrompt(prompt);
-
-    // Clear generated code DO
-    const generatedId = c.env.PROMPTS.idFromName(`generated:${promptHash}`);
-    await c.env.PROMPTS.get(generatedId).fetch(new URL("/clear", "http://do").toString(), {
-      method: "DELETE"
-    });
-
-    // Clear R2 compiled cache
-    await cache.delete(promptHash);
+  async get(hash: string): Promise<CachedTool | null> {
+    try {
+      const object = await this.r2.get(`tools/${hash}.json`);
+      if (!object) return null;
+      return await object.json() as CachedTool;
+    } catch {
+      return null;
+    }
   }
 
-  // Clear history
-  await historyStub.fetch(new URL("/clear", "http://do").toString(), {
-    method: "DELETE"
-  });
+  async set(hash: string, tool: Omit<CachedTool, 'hash'>): Promise<void> {
+    const data: CachedTool = { hash, ...tool };
+    await this.r2.put(`tools/${hash}.json`, JSON.stringify(data), {
+      httpMetadata: { contentType: 'application/json' }
+    });
+  }
+}
 
-  return new Response("cleared");
-});
+// Compilation via container
+async function compileTool(code: string, env: Cloudflare.Env): Promise<{ bundledCode: string; packages: string[] }> {
+  console.log("Starting compilation...");
 
+  // Use localhost fallback for local dev
+  const useLocalhost = true; // Force localhost for now since container isn't working
 
-app.post("/api/store-prompt", async (c) => {
-  const { prompt } = await c.req.json();
-  if (prompt?.trim()) {
-    const id = c.env.PROMPTS.idFromName("history");
-    await c.env.PROMPTS.get(id).fetch(new URL("/write", "http://do").toString(), {
+  let response;
+  if (useLocalhost) {
+    response = await fetch('http://localhost:3000/compile', {
       method: "POST",
-      body: prompt
-    }).catch(() => {});
-  }
-  return new Response("ok");
-});
-
-app.post("/api/execute-tool", async (c) => {
-  try {
-    const { code, input, prompt } = await c.req.json();
-
-    if (!code?.trim()) {
-      console.error("No code provided");
-      return Response.json({ error: "No code provided" }, { status: 400 });
-    }
-
-    if (!c.env.LOADER) {
-      console.error("LOADER binding not available");
-      return Response.json({ error: "Worker Loaders not available - check wrangler.jsonc" }, { status: 500 });
-    }
-
-    // Create hash for caching based on prompt, not generated code
-    // This ensures consistent cache hits for same prompts even if AI generates slightly different code
-    const promptHash = prompt ? await hashPrompt(prompt) : await hashPrompt(code);
-    const isolateId = `tool:${promptHash}`;
-
-    console.log("Execute tool:", { hash: promptHash.substring(0, 8), hasPrompt: !!prompt });
-
-    // Initialize R2 cache
-    const cache = new R2ToolCache(c.env.TOOL_CACHE);
-
-    // Check cache first
-    const cachedTool = await cache.get(promptHash);
-    if (cachedTool) {
-      console.log("Cache hit! Using cached compiled tool");
-
-      // Create worker with cached modules
-      const worker = c.env.LOADER.get(isolateId, async () => ({
-        compatibilityDate: "2025-06-01",
-        mainModule: "main.js",
-        modules: {
-          "main.js": cachedTool.code,
-          ...cachedTool.nodeModules
-        },
-        env: {
-          WHO: "dynamic-tool",
-          PROXY_URL: new URL("/proxy", c.req.url).toString()
-        }
-      }));
-
-      const endpoint = worker.getEntrypoint();
-      const url = new URL(`http://tool/?q=${encodeURIComponent(input)}`);
-      const out = await endpoint.fetch(url.toString());
-      const output = await out.text();
-      const contentType = out.headers.get("content-type") || "text/plain";
-
-      return Response.json({ output, contentType });
-    }
-
-    console.log("Cache miss. Compiling tool...");
-
-    let compilerResult;
-    let compilationMethod = "unknown";
-
-    // Use Bun compilation via Durable Object (has filesystem access)
-    try {
-      console.log("Attempting Bun compilation in DO...");
-      compilerResult = await compileWithBun(code, c.env);
-      compilationMethod = "bun";
-      console.log("Bun compilation successful");
-    } catch (bunError) {
-      console.error("Bun compilation failed:", bunError);
-      throw bunError; // No fallback - let it fail
-    }
-
-    // Cache the compiled result
-    try {
-      await cache.set(promptHash, {
-        code: compilerResult.mainCode,
-        nodeModules: compilerResult.additionalModules,
-        metadata: {
-          createdAt: Date.now(),
-          packages: compilerResult.packages
-        }
-      });
-      console.log("Tool cached successfully");
-    } catch (cacheError) {
-      console.warn("Failed to cache compiled tool:", cacheError);
-      // Continue without caching
-    }
-
-    // Create worker with compiled result
-    const worker = c.env.LOADER.get(isolateId, async () => ({
-      compatibilityDate: "2025-06-01",
-      mainModule: "main.js",
-      modules: {
-        "main.js": compilerResult.mainCode,
-        ...compilerResult.additionalModules
-      },
-      env: {
-        WHO: "dynamic-tool",
-        PROXY_URL: new URL("/proxy", c.req.url).toString()
-      }
-    }));
-
-    console.log("Getting endpoint...");
-    const endpoint = worker.getEntrypoint();
-
-    const url = new URL(`http://tool/?q=${encodeURIComponent(input)}`);
-    console.log("Fetching:", url.toString());
-
-    const out = await endpoint.fetch(url.toString());
-    console.log("Response status:", out.status);
-
-    const output = await out.text();
-    const contentType = out.headers.get("content-type") || "text/plain";
-
-    console.log("Success! Output length:", output.length);
-    console.log("Compilation method:", compilationMethod);
-
-    return Response.json({ output, contentType });
-
-  } catch (error) {
-    console.error("Execute tool error:", error);
-    const errorMessage = error instanceof Error ? error.message : String(error);
-    return Response.json({ error: errorMessage }, { status: 500 });
-  }
-});
-
-app.get("/proxy", async (c) => {
-  const url = c.req.query('url');
-  if (!url) {
-    return new Response('Missing url parameter', { status: 400 });
-  }
-
-  try {
-    console.log("Proxying request to:", url);
-    const response = await fetch(url);
-    const data = await response.text();
-
-    return new Response(data, {
-      status: response.status,
-      headers: {
-        'Content-Type': response.headers.get('Content-Type') || 'application/json',
-        'Access-Control-Allow-Origin': '*'
-      }
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ code })
     });
-  } catch (error) {
-    console.error("Proxy error:", error);
-    return new Response(`Proxy error: ${error.message}`, { status: 500 });
-  }
-});
-
-
-app.post("/api/generate-code", async (c) => {
-  const { prompt } = await c.req.json();
-
-  if (!prompt?.trim()) {
-    return new Response("Missing prompt", { status: 400 });
-  }
-
-  console.log("Generating code with OpenAI for:", prompt);
-
-  // Check DO cache first for exact prompt match
-  const promptHash = await hashPrompt(prompt);
-  const id = c.env.PROMPTS.idFromName(`generated:${promptHash}`);
-  const stub = c.env.PROMPTS.get(id);
-
-  // Try to get cached generated code from DO
-  const cachedResponse = await stub.fetch(new URL("/get-generated", "http://do").toString());
-  if (cachedResponse.ok) {
-    const cached = await cachedResponse.json();
-    console.log("Cache hit! Serving cached generated code");
-    return Response.json(cached);
+  } else {
+    if (!env.BUN_COMPILER_DO) {
+      throw new Error('BUN_COMPILER_DO container binding not available');
+    }
+    console.log("Using container for compilation...");
+    const container = env.BUN_COMPILER_DO.get(env.BUN_COMPILER_DO.idFromName('compiler'));
+    response = await container.fetch('http://container/compile', {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ code })
+    });
+    console.log("Container response status:", response.status);
   }
 
-  console.log("Cache miss. Generating new code...");
-
-  if (!c.env.OPENAI_API_KEY) {
-    console.error("OPENAI_API_KEY not found in environment");
-    return new Response("OpenAI API key not configured", { status: 500 });
+  if (!response.ok) {
+    const errorText = await response.text();
+    console.error("Compilation failed:", response.status, errorText);
+    try {
+      const error = JSON.parse(errorText);
+      throw new Error(error.error || `Compilation failed: ${response.status}`);
+    } catch (jsonError) {
+      throw new Error(`Compilation failed: ${response.status} - ${errorText}`);
+    }
   }
+
+  const responseText = await response.text();
+  console.log("Compilation response:", responseText.substring(0, 200));
 
   try {
-    // Search for relevant npm packages based on the prompt
-    const searchResults = await Effect.runPromise(searchNpmPackages(prompt));
-    const availablePackages = searchResults.slice(0, 20); // Top 20 results
+    const result = JSON.parse(responseText);
+    return {
+      bundledCode: result.mainCode,
+      packages: result.packages || []
+    };
+  } catch (jsonError) {
+    console.error("Failed to parse compilation response as JSON:", responseText.substring(0, 200));
+    throw new Error(`Invalid JSON response from compiler: ${responseText.substring(0, 100)}`);
+  }
+}
 
-    console.log("Found available packages:", availablePackages.map(p => p.name));
+// Execute tool using Worker Loaders
+async function executeTool(bundledCode: string, input: string, hash: string, env: Cloudflare.Env): Promise<{ output: string; contentType: string }> {
+  if (!env.LOADER) {
+    throw new Error('Worker Loaders not available');
+  }
 
-    // For better results, try to get package info for the most relevant packages
-    let packageExportsInfo = '';
-    if (availablePackages.length > 0) {
-      const topPackage = availablePackages[0];
-      try {
-        // Quick check of the top package's exports
-        const quickInfo = await fetch(`https://registry.npmjs.org/${topPackage.name}/latest`);
-        const quickPackageInfo = await quickInfo.json();
+  const isolateId = `tool:${hash}`;
 
-        packageExportsInfo = `\n\nTOP PACKAGE INFO:
-- ${topPackage.name}: ${topPackage.description}
-  - Main entry: ${quickPackageInfo.main || 'index.js'}
-  - Browser entry: ${typeof quickPackageInfo.browser === 'string' ? quickPackageInfo.browser : 'check browser field'}
-  - NOTE: Use default import or check actual exports in console logs`;
-      } catch (e) {
-        // Fallback to basic list
-      }
+  const worker = env.LOADER.get(isolateId, async () => ({
+    compatibilityDate: "2025-09-27",
+    mainModule: "tool.js",
+    modules: {
+      "tool.js": bundledCode
+    }
+  }));
+
+  const endpoint = worker.getEntrypoint();
+  const url = new URL(`http://tool/?q=${encodeURIComponent(input)}`);
+  const response = await endpoint.fetch(url.toString());
+  const output = await response.text();
+  const contentType = response.headers.get("content-type") || "text/plain";
+
+  return { output, contentType };
+}
+
+// Simple history storage
+class PromptHistory {
+  private history: string[] = [];
+
+  add(prompt: string) {
+    if (prompt?.trim()) {
+      // Remove duplicates and add to front
+      this.history = [prompt, ...this.history.filter(p => p !== prompt)].slice(0, 50);
+    }
+  }
+
+  list(): string[] {
+    return [...this.history];
+  }
+
+  clear() {
+    this.history = [];
+  }
+}
+
+const promptHistory = new PromptHistory();
+
+// Main API endpoint: Generate and Execute
+app.post("/api/tool", async (c) => {
+  let hash = "(null)";
+  let tool = null;
+  try {
+    const { prompt, input = "", forceRegenerate = false } = await c.req.json();
+
+    if (!prompt?.trim()) {
+      return Response.json({ error: "Missing prompt" }, { status: 400 });
     }
 
-    const packageList = availablePackages.length > 0
-      ? `\n\nAVAILABLE NPM PACKAGES (use these EXACT names only):\n${availablePackages.map(p => `- ${p.name}: ${p.description}`).join('\n')}${packageExportsInfo}`
-      : '';
+    // 1. Hash prompt and store in history
+    hash = await hashPrompt(prompt);
+    promptHistory.add(prompt);
+    console.log(`Tool request: ${hash.substring(0, 8)}`);
 
-    const openai = createOpenAI({
-      apiKey: c.env.OPENAI_API_KEY,
-    });
+    // 2. Check cache (unless forcing regeneration)
+    const cache = new ToolCache(c.env.TOOL_CACHE);
+    tool = forceRegenerate ? null : await cache.get(hash);
 
-    const result = await Effect.runPromise(
-      generateWithRetry(() => generateObject({
-        model: openai("gpt-5-mini"),
+    if (forceRegenerate && tool) {
+      console.log("Force regeneration - clearing cached tool");
+      await c.env.TOOL_CACHE.delete(`tools/${hash}.json`);
+      tool = null;
+    }
+
+    if (!tool) {
+      console.log("Cache miss - generating tool");
+
+      // 3. Generate code with AI
+      if (!c.env.OPENAI_API_KEY) {
+        return Response.json({ error: "OpenAI API key not configured" }, { status: 500 });
+      }
+
+      const openai = createOpenAI({ apiKey: c.env.OPENAI_API_KEY });
+
+      const result = await generateObject({
+        model: openai("gpt-4o-mini"),
         schema: z.object({
           typescript: z.string().describe("Complete Cloudflare Worker code that implements the requested functionality"),
-          example: z.string().describe("ONLY the parameter value that goes into ?q=VALUE - NOT a full URL. Example: 'usd' not 'https://example.com/?q=usd'")
+          example: z.string().describe("ONLY the parameter value that goes into ?q=VALUE - NOT a full URL. Example: 'usd' not 'https://example.com/?q=usd'"),
+          outputType: z.enum(['text', 'json', 'html', 'image', 'svg', 'csv', 'xml']).describe("Expected output content type from this tool"),
+          outputDescription: z.string().describe("Brief description of what the output contains (e.g., 'Base64-encoded PNG image', 'HTML with embedded QR code', 'JSON with UUID')")
         }),
-      prompt: `Create a Cloudflare Worker that implements: ${prompt}${packageList}
+        prompt: `Create a Cloudflare Worker that implements: ${prompt}
 
 EXACT FORMAT REQUIRED:
 import { something } from 'package-name';
@@ -640,29 +386,31 @@ CRITICAL REQUIREMENTS:
 - Must follow EXACT format above (simple object literal export)
 - ONLY import npm packages if you ACTUALLY USE them in your code - unused imports cause errors
 - If you import a package, you MUST use it in your implementation
-- When possible, implement with native fetch() instead of importing external packages
-- ONLY import npm packages from the AVAILABLE NPM PACKAGES list above (use EXACT names)
-- If no suitable package is listed, implement without imports or return an error
-- IMPORT SYNTAX: Most packages use default exports, so prefer: import packageName from 'package-name'
-- If you need named exports, use: import { specificFunction } from 'package-name'
-- NEVER assume what exports are available - use default import first, then destructure if needed
+- WORKER COMPATIBILITY: Only use packages that work in Cloudflare Workers (no DOM, no Node.js APIs)
+- RECOMMENDED PACKAGES: uuid, lodash, date-fns, crypto-js, marked, zxcvbn
+- AVOID: qrcode (needs canvas), sharp (needs Node), puppeteer, any DOM-dependent packages
+- When possible, implement with native fetch() and Web APIs instead of importing packages
 - Write PLAIN JAVASCRIPT (no TypeScript types like req: Request, env: any)
 - NO async/await in import statements - use static imports only
 - NO dynamic imports - all imports must be at the top of file
 - NO require() statements
 - Add try/catch for error handling inside fetch function
 - Return new Response() with proper headers
-- ABSOLUTELY NEVER write "fallback code" that makes it look like the code works. It either works as expected or it errors out.
-- If a package doesn't exist, the code should fail clearly, not provide alternatives
 - Accept input via URL query parameter ?q=INPUT - use new URL(req.url).searchParams.get('q')
-- NEVER call external APIs directly - ALWAYS use fetch(env.PROXY_URL + '?url=' + encodeURIComponent(externalUrl))
-- Do NOT use axios.get(externalUrl) - use fetch(env.PROXY_URL + '?url=' + encodeURIComponent(externalUrl))
+- Always have a sensible default value for the input, so empty calls don't error
+- If no suitable package is available, implement without imports or return an error
+- Match your outputType choice: 'image' = return base64 data or data URLs, 'html' = return HTML, 'json' = return JSON, etc.
+- For images: return base64 strings, data URLs, or raw image data
+- For HTML: return complete HTML snippets that can be directly rendered
+- CRITICAL: If using async operations, make fetch function async and await all promises
+- NEVER return [object Promise] - always await async operations before returning
+- FOR QR CODES: Use 'qr-code-generator' package (pure JS, no canvas) or implement simple QR logic
+- FOR IMAGES: Return base64 string or data URL, NOT a Promise object
+- WORKERS LIMITATION: No canvas/DOM/Node APIs - only Web APIs and pure JS packages
 
-SAFE IMPORT PATTERN:
-import packageName from 'package-name';
-// Then use packageName.methodName() or destructure: const { methodName } = packageName;
+WORKING EXAMPLES:
 
-WORKING EXAMPLE:
+// Simple sync example:
 import { v4 as uuidv4 } from 'uuid';
 
 export default {
@@ -676,218 +424,481 @@ export default {
       return new Response('Error', { status: 500 });
     }
   }
-}`
-      }))
-    );
+}
 
-    console.log("Generated typescript length:", result.object.typescript.length);
-    console.log("Generated example:", result.object.example);
+// QR code example with worker-compatible package:
+import qrcode from 'qr-code-generator';
 
-    // Minimal validation - just check it looks like a Worker
-    const code = result.object.typescript.trim();
-    const example = result.object.example.trim();
-
-    if (!code.includes("export default") || !code.includes("fetch(")) {
-      console.error("VALIDATION FAILED: Doesn't look like a Worker export");
-      return new Response("Generated code must export a Worker with fetch handler", { status: 500 });
-    }
-
-    // Basic brace matching
-    const openBraces = (code.match(/\{/g) || []).length;
-    const closeBraces = (code.match(/\}/g) || []).length;
-    if (openBraces !== closeBraces) {
-      console.error(`VALIDATION FAILED: Mismatched braces: ${openBraces} open, ${closeBraces} close`);
-      return new Response(`Syntax error: mismatched braces`, { status: 500 });
-    }
-
-    // Check for common URL typos in imports
-    if (code.includes('https:/esm.sh')) {
-      console.error("VALIDATION FAILED: Malformed esm.sh URL (missing slash)");
-      return new Response(`Import URL error: use https://esm.sh not https:/esm.sh`, { status: 500 });
-    }
-
-    // Cache the generated result in DO
-    const generatedResult = {
-      typescript: result.object.typescript,
-      example: result.object.example
-    };
-
+export default {
+  fetch(req, env, ctx) {
     try {
-      await stub.fetch(new URL("/cache-generated", "http://do").toString(), {
-        method: "POST",
-        body: JSON.stringify(generatedResult)
+      const input = new URL(req.url).searchParams.get('q') || 'Hello World';
+      const qr = qrcode(0, 'M');
+      qr.addData(input);
+      qr.make();
+      const svgString = qr.createSvgTag(4, 0);
+      return new Response(svgString, {
+        headers: { 'Content-Type': 'image/svg+xml' }
       });
-      console.log("Generated code cached in DO");
-    } catch (cacheError) {
-      console.warn("Failed to cache generated code:", cacheError);
+    } catch (error) {
+      return new Response('Error generating QR code', { status: 500 });
     }
-
-    return Response.json(generatedResult);
-
-  } catch (error) {
-    console.error("OpenAI generation error:", error);
-    return new Response(`OpenAI error: ${error instanceof Error ? error.message : String(error)}`, { status: 500 });
   }
-});
-
-// Combined generate and execute endpoint for AI function calling
-app.post("/api/generate-and-execute", async (c) => {
-  try {
-    const { prompt, input } = await c.req.json();
-
-    if (!prompt?.trim()) {
-      return Response.json({ error: "Missing prompt" }, { status: 400 });
-    }
-
-    console.log("Generate and execute:", { prompt: prompt.substring(0, 50), hasInput: !!input });
-
-    // Step 1: Generate the tool (with caching)
-    const generateResponse = await fetch(new URL("/api/generate-code", c.req.url).toString(), {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ prompt })
-    });
-
-    if (!generateResponse.ok) {
-      const error = await generateResponse.text();
-      return Response.json({ error: `Generation failed: ${error}` }, { status: 500 });
-    }
-
-    const generated = await generateResponse.json();
-
-    // Step 2: Execute the tool immediately
-    const executeResponse = await fetch(new URL("/api/execute-tool", c.req.url).toString(), {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        code: generated.typescript,
-        input: input || generated.example,
-        prompt
-      })
-    });
-
-    if (!executeResponse.ok) {
-      const error = await executeResponse.text();
-      return Response.json({ error: `Execution failed: ${error}` }, { status: 500 });
-    }
-
-    const executed = await executeResponse.json();
-
-    return Response.json({
-      toolDescription: prompt,
-      result: executed.output,
-      contentType: executed.contentType,
-      exampleInput: generated.example,
-      cached: executeResponse.headers.get("x-cache") === "hit"
-    });
-
-  } catch (error) {
-    console.error("Generate and execute error:", error);
-    return Response.json({
-      error: `Tool execution failed: ${error instanceof Error ? error.message : String(error)}`
-    }, { status: 500 });
-  }
-});
-
-// Tool discovery endpoint for searching cached tools
-app.get("/api/tools/search", async (c) => {
-  const query = c.req.query('q');
-
-  if (!query) {
-    return Response.json({ error: "Missing query parameter" }, { status: 400 });
-  }
-
-  try {
-    // Get all prompts from history to search through
-    const historyId = c.env.PROMPTS.idFromName("history");
-    const historyStub = c.env.PROMPTS.get(historyId);
-    const historyResponse = await historyStub.fetch(new URL("/list", "http://do").toString());
-    const allPrompts: string[] = await historyResponse.json();
-
-    // Simple text search through cached prompts
-    const matches = allPrompts
-      .filter(prompt => prompt.toLowerCase().includes(query.toLowerCase()))
-      .slice(0, 10)
-      .map(async (prompt) => {
-        const hash = await hashPrompt(prompt);
-        return {
-          prompt,
-          hash: hash.substring(0, 8),
-          description: prompt
-        };
+}`
       });
 
-    const results = await Promise.all(matches);
+      // 4. Compile code
+      const compiled = await compileTool(result.object.typescript, c.env);
+
+      // 5. Cache compiled tool
+      tool = {
+        hash,
+        bundledCode: compiled.bundledCode,
+        createdAt: Date.now(),
+        packages: compiled.packages,
+        outputType: result.object.outputType,
+        outputDescription: result.object.outputDescription
+      };
+
+      await cache.set(hash, tool);
+      console.log(`Cached tool: ${hash.substring(0, 8)} with ${tool.packages.length} packages`);
+    } else {
+      console.log("Cache hit - using cached tool");
+    }
+
+    // 6. Execute tool
+    console.log("Executing tool with hash:", hash.substring(0, 8));
+    const result = await executeTool(tool.bundledCode, input, hash, c.env);
+    console.log("Tool execution completed successfully");
 
     return Response.json({
-      query,
-      results,
-      total: results.length
+      output: result.output,
+      contentType: result.contentType,
+      outputType: tool.outputType,
+      outputDescription: tool.outputDescription,
+      toolHash: hash.substring(0, 255),
+      packages: tool.packages,
+      cached: !!tool,
+      generatedCode: tool.bundledCode
     });
 
   } catch (error) {
-    console.error("Tool search error:", error);
-    return Response.json({ error: "Search failed" }, { status: 500 });
-  }
-});
-
-// Quick execute cached tool by prompt
-app.post("/api/tools/execute", async (c) => {
-  try {
-    const { prompt, input } = await c.req.json();
-
-    if (!prompt?.trim()) {
-      return Response.json({ error: "Missing prompt" }, { status: 400 });
-    }
-
-    // Check if tool is cached
-    const promptHash = await hashPrompt(prompt);
-    const cache = new R2ToolCache(c.env.TOOL_CACHE);
-    const cachedTool = await cache.get(promptHash);
-
-    if (!cachedTool) {
-      return Response.json({
-        error: "Tool not cached. Use /api/generate-and-execute first.",
-        suggestion: `POST /api/generate-and-execute with prompt: "${prompt}"`
-      }, { status: 404 });
-    }
-
-    // Execute cached tool directly
-    const isolateId = `tool:${promptHash}`;
-    const worker = c.env.LOADER.get(isolateId, async () => ({
-      compatibilityDate: "2025-06-01",
-      mainModule: "main.js",
-      modules: {
-        "main.js": cachedTool.code,
-        ...cachedTool.nodeModules
-      },
-      env: {
-        WHO: "cached-tool",
-        PROXY_URL: new URL("/proxy", c.req.url).toString()
+    console.error("Tool execution error:", error);
+    console.error("Error stack:", error instanceof Error ? error.stack : 'No stack trace');
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error("Detailed error:", {
+      message: errorMessage,
+      hash: hash?.substring(0, 8),
+      hasCode: !!tool?.bundledCode,
+      packages: tool?.packages || []
+    });
+    return Response.json({
+      error: `Tool failed: ${errorMessage}`,
+      details: {
+        hash: hash?.substring(0, 8),
+        packages: tool?.packages || [],
+        stack: error instanceof Error ? error.stack : undefined
       }
-    }));
-
-    const endpoint = worker.getEntrypoint();
-    const url = new URL(`http://tool/?q=${encodeURIComponent(input || "")}`);
-    const out = await endpoint.fetch(url.toString());
-    const output = await out.text();
-    const contentType = out.headers.get("content-type") || "text/plain";
-
-    return Response.json({
-      result: output,
-      contentType,
-      cached: true,
-      toolHash: promptHash.substring(0, 8)
-    });
-
-  } catch (error) {
-    console.error("Cached tool execution error:", error);
-    return Response.json({
-      error: `Execution failed: ${error instanceof Error ? error.message : String(error)}`
     }, { status: 500 });
   }
 });
 
+// History endpoints
+app.get("/recent", async (c) => {
+  const recent = promptHistory.list();
+
+  return c.render(
+    <div className="bg-gray-900 text-gray-100 min-h-screen">
+      <div className="container mx-auto px-4 py-8 max-w-4xl">
+        <div className="flex justify-between items-center mb-6">
+          <h1 className="text-2xl font-bold">Recent Prompts</h1>
+          <div className="flex gap-3">
+            <button onclick="clearAll()" className="px-4 py-2 bg-red-600 hover:bg-red-700 rounded">
+              Clear All
+            </button>
+            <a href="/" className="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded">
+              Back to Tool
+            </a>
+          </div>
+        </div>
+
+        <div className="space-y-3">
+          {recent.length === 0 ? (
+            <p className="text-gray-400">No prompts yet. Create some tools first!</p>
+          ) : (
+            recent.map((prompt, i) => (
+              <div key={i} className="bg-gray-800 p-4 rounded-lg">
+                <button
+                  onclick={`loadPrompt('${prompt.replace(/'/g, "\\'")}', event)`}
+                  className="w-full text-left text-gray-100 hover:text-blue-400 transition-colors"
+                >
+                  {prompt}
+                </button>
+              </div>
+            ))
+          )}
+        </div>
+
+        <script dangerouslySetInnerHTML={{__html: `
+          function clearAll() {
+            if (confirm('Clear all history?')) {
+              fetch('/api/clear-history', { method: 'DELETE' })
+                .then(() => location.reload())
+                .catch(err => alert('Error: ' + err.message));
+            }
+          }
+
+          function loadPrompt(prompt, event) {
+            event.preventDefault();
+            sessionStorage.setItem('loadPrompt', prompt);
+            window.location.href = '/';
+          }
+        `}} />
+      </div>
+    </div>
+  );
+});
+
+app.delete("/api/clear-history", async (c) => {
+  promptHistory.clear();
+  return Response.json({ message: "History cleared" });
+});
+
+// Serve the HTML interface
+app.get("/", async (c) => {
+  const _html = await marked(readmeContent, {
+    breaks: true,
+  });
+  return c.render(
+    <div className="bg-gray-900 text-gray-100 min-h-screen">
+      <div className="container mx-auto px-4 py-8 max-w-4xl">
+        <h1 className="text-3xl font-bold mb-2">Anytool</h1>
+        <p className="text-gray-400 mb-4">Infinite tools without the context bloat</p>
+
+        <details className="mb-6 p-4 bg-gray-800 rounded-lg">
+          <summary className="cursor-pointer text-blue-400 font-semibold hover:text-blue-300">
+            Learn More
+          </summary>
+          <div
+            className="mt-4 prose prose-invert prose-sm max-w-none text-gray-300 leading-relaxed"
+            dangerouslySetInnerHTML={{
+              __html: _html
+            }}
+          />
+        </details>
+
+        <div className="space-y-6">
+          {/* Input Section */}
+          <div className="bg-gray-800 p-6 rounded-lg">
+            <label className="block text-sm font-medium mb-2">Describe your tool:</label>
+            <textarea
+              id="prompt"
+              rows={4}
+              className="w-full p-3 bg-gray-700 border border-gray-600 rounded focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+              placeholder="Create a tool that converts markdown to HTML using the marked package"
+            />
+
+            <div className="mt-4 space-y-3">
+              <div className="flex gap-3">
+                <input
+                  id="input"
+                  type="text"
+                  className="flex-1 p-3 bg-gray-700 border border-gray-600 rounded focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                  placeholder="Test input (optional)"
+                />
+                <button
+                  id="execute"
+                  className="px-6 py-3 bg-blue-600 hover:bg-blue-700 rounded font-medium"
+                  onclick="executeTool()"
+                >
+                  »
+                </button>
+              </div>
+              <div className="flex gap-2 text-sm flex-col md:flex-row">
+                <label className="flex items-center gap-2">
+                  <input type="checkbox" id="forceRegenerate" className="rounded" />
+                  <span>Force regenerate (bypass cache)</span>
+                </label>
+                <a href="/recent" className="px-3 py-1 bg-gray-600 hover:bg-gray-500 rounded text-sm">
+                  History
+                </a>
+              </div>
+            </div>
+          </div>
+
+          {/* Output Section */}
+          <div id="output" className="bg-gray-800 p-6 rounded-lg hidden">
+            <div className="mb-4">
+              <h3 className="text-lg font-medium">Output</h3>
+              <div id="meta" className="text-sm text-gray-400 block"></div>
+            </div>
+            <div className="grid gap-4">
+              <div className="bg-gray-900 p-4 rounded overflow-auto">
+                <div className="text-xs text-gray-400 mb-2">Result:</div>
+                <pre id="result" className="whitespace-pre-wrap"></pre>
+              </div>
+              <div id="generatedCodeSection" className="bg-gray-900 p-4 rounded overflow-auto hidden">
+                <div className="text-xs text-gray-400 mb-2">Generated Worker Code:</div>
+                <pre id="generatedCode" className="whitespace-pre-wrap text-green-400 text-xs max-h-60 overflow-auto"></pre>
+              </div>
+            </div>
+          </div>
+
+          {/* Examples */}
+          <div className="bg-gray-800 p-6 rounded-lg">
+            <h3 className="text-lg font-medium mb-4">Example Tools</h3>
+            <div className="grid gap-2">
+              <button onclick="setPrompt('Create a UUID generator using the uuid package')" className="text-left p-2 bg-gray-700 hover:bg-gray-600 rounded text-sm">
+                UUID Generator
+              </button>
+              <button onclick="setPrompt('Build a QR code generator that returns SVG using qr-code-generator')" className="text-left p-2 bg-gray-700 hover:bg-gray-600 rounded text-sm">
+                QR Code Generator (SVG)
+              </button>
+              <button onclick="setPrompt('Create a markdown to HTML converter using marked')" className="text-left p-2 bg-gray-700 hover:bg-gray-600 rounded text-sm">
+                Markdown Converter
+              </button>
+              <button onclick="setPrompt('Build a password strength checker using zxcvbn')" className="text-left p-2 bg-gray-700 hover:bg-gray-600 rounded text-sm">
+                Password Checker
+              </button>
+              <button onclick="setPrompt('Create a simple hello world tool')" className="text-left p-2 bg-gray-700 hover:bg-gray-600 rounded text-sm">
+                Hello World (no deps)
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <script dangerouslySetInnerHTML={{__html: `
+          function setPrompt(text) {
+            document.getElementById('prompt').value = text;
+          }
+
+          function displayOutput(container, output, outputType) {
+            container.innerHTML = ''; // Clear previous content
+
+            switch(outputType) {
+              case 'image':
+                if (output.startsWith('data:image/') || output.startsWith('http')) {
+                  const img = document.createElement('img');
+                  img.src = output;
+                  img.style.maxWidth = '100%';
+                  img.style.height = 'auto';
+                  container.appendChild(img);
+                } else if (output.includes('<svg') || output.includes('<?xml')) {
+                  // Handle SVG content returned as image
+                  container.innerHTML = output;
+                } else {
+                  // Try to create data URL from base64
+                  const img = document.createElement('img');
+                  img.src = \`data:image/png;base64,\${output}\`;
+                  img.style.maxWidth = '100%';
+                  img.style.height = 'auto';
+                  container.appendChild(img);
+                }
+                break;
+
+              case 'html':
+                container.innerHTML = output;
+                break;
+
+              case 'svg':
+                container.innerHTML = output;
+                break;
+
+              case 'json':
+                try {
+                  const formatted = JSON.stringify(JSON.parse(output), null, 2);
+                  container.textContent = formatted;
+                } catch {
+                  container.textContent = output;
+                }
+                break;
+
+              case 'csv':
+                // Create a simple table for CSV
+                const lines = output.split('\\n').filter(line => line.trim());
+                if (lines.length > 0) {
+                  const table = document.createElement('table');
+                  table.className = 'w-full border-collapse border border-gray-600';
+
+                  lines.forEach((line, index) => {
+                    const row = document.createElement('tr');
+                    const cells = line.split(',');
+
+                    cells.forEach(cell => {
+                      const cellElement = document.createElement(index === 0 ? 'th' : 'td');
+                      cellElement.className = 'border border-gray-600 px-2 py-1 text-left';
+                      cellElement.textContent = cell.trim();
+                      row.appendChild(cellElement);
+                    });
+
+                    table.appendChild(row);
+                  });
+
+                  container.appendChild(table);
+                } else {
+                  container.textContent = output;
+                }
+                break;
+
+              default:
+                container.textContent = output;
+            }
+          }
+
+          async function executeTool() {
+            const prompt = document.getElementById('prompt').value.trim();
+            const input = document.getElementById('input').value.trim();
+            const forceRegenerate = document.getElementById('forceRegenerate').checked;
+            const button = document.getElementById('execute');
+            const output = document.getElementById('output');
+            const result = document.getElementById('result');
+            const meta = document.getElementById('meta');
+            const generatedCode = document.getElementById('generatedCode');
+            const generatedCodeSection = document.getElementById('generatedCodeSection');
+
+            if (!prompt) {
+              alert('Please describe your tool');
+              return;
+            }
+
+            // Update UI
+            button.disabled = true;
+            button.textContent = 'Executing...';
+            output.classList.add('hidden');
+
+            try {
+              const response = await fetch('/api/tool', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ prompt, input, forceRegenerate })
+              });
+
+              const data = await response.json();
+
+              if (!response.ok) {
+                throw new Error(data.error || 'Request failed');
+              }
+
+              // Show results based on output type
+              displayOutput(result, data.output, data.outputType);
+              meta.textContent = \`\${data.outputType} • \${data.outputDescription} • \${data.packages.length} packages • \${data.cached ? 'cached' : 'compiled'} • \${data.toolHash}\`;
+
+              // Show generated code if available
+              if (data.generatedCode) {
+                generatedCode.textContent = data.generatedCode;
+                generatedCodeSection.classList.remove('hidden');
+              } else {
+                generatedCodeSection.classList.add('hidden');
+              }
+
+              output.classList.remove('hidden');
+
+            } catch (error) {
+              result.textContent = \`Error: \${error.message}\`;
+              meta.textContent = 'error';
+              generatedCodeSection.classList.add('hidden');
+              output.classList.remove('hidden');
+            } finally {
+              button.disabled = false;
+              button.textContent = '»';
+            }
+          }
+
+          // Allow Enter to execute
+          document.getElementById('input').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') executeTool();
+          });
+
+          // Load prompt from session storage (from history page)
+          const loadPrompt = sessionStorage.getItem('loadPrompt');
+          if (loadPrompt) {
+            document.getElementById('prompt').value = loadPrompt;
+            sessionStorage.removeItem('loadPrompt');
+          }
+        `}} />
+      </div>
+    </div>
+  );
+});
+
+// Container ping for debugging
+app.get("/ping-container", async (c) => {
+  try {
+    if (!c.env.BUN_COMPILER_DO) {
+      return Response.json({ error: "BUN_COMPILER_DO not available" }, { status: 500 });
+    }
+    const container = c.env.BUN_COMPILER_DO.get(c.env.BUN_COMPILER_DO.idFromName('compiler'));
+    const response = await container.fetch('http://container/ping');
+    const result = await response.text();
+    return new Response(result, {
+      headers: { 'Content-Type': 'application/json' }
+    });
+  } catch (error) {
+    console.error("Container ping error:", error);
+    return Response.json({ error: error.message }, { status: 500 });
+  }
+});
+
+// Clear cache endpoint
+app.delete("/api/cache/:hash?", async (c) => {
+  try {
+    const hash = c.req.param('hash');
+    const cache = new ToolCache(c.env.TOOL_CACHE);
+
+    if (hash) {
+      // Clear specific tool
+      await c.env.TOOL_CACHE.delete(`tools/${hash}.json`);
+      console.log(`Cleared cache for hash: ${hash}`);
+      return Response.json({ message: `Cache cleared for ${hash}` });
+    } else {
+      // Clear all cache
+      const list = await c.env.TOOL_CACHE.list({ prefix: 'tools/' });
+      for (const object of list.objects) {
+        await c.env.TOOL_CACHE.delete(object.key);
+      }
+      console.log(`Cleared all cache (${list.objects.length} items)`);
+      return Response.json({ message: `Cleared all cache (${list.objects.length} items)` });
+    }
+  } catch (error) {
+    console.error("Cache clear error:", error);
+    return Response.json({ error: error.message }, { status: 500 });
+  }
+});
+
+// List cache endpoint
+app.get("/api/cache", async (c) => {
+  try {
+    const list = await c.env.TOOL_CACHE.list({ prefix: 'tools/' });
+    const items = [];
+
+    for (const object of list.objects.slice(0, 50)) { // Limit to 50 items
+      try {
+        const cached = await c.env.TOOL_CACHE.get(object.key);
+        if (cached) {
+          const data = await cached.json() as any;
+          items.push({
+            hash: data.hash?.substring(0, 8) || 'unknown',
+            packages: data.packages || [],
+            createdAt: data.createdAt,
+            size: object.size
+          });
+        }
+      } catch (e) {
+        // Skip invalid cache entries
+      }
+    }
+
+    return Response.json({
+      total: list.objects.length,
+      items: items.sort((a, b) => b.createdAt - a.createdAt)
+    });
+  } catch (error) {
+    console.error("Cache list error:", error);
+    return Response.json({ error: error.message }, { status: 500 });
+  }
+});
+
+// BunCompiler Durable Object with container
 export class BunCompiler extends DurableObject<Cloudflare.Env> {
   container: globalThis.Container;
 
@@ -895,7 +906,9 @@ export class BunCompiler extends DurableObject<Cloudflare.Env> {
     super(ctx, env);
     this.container = ctx.container!;
     void this.ctx.blockConcurrencyWhile(async () => {
-      if (!this.container.running) this.container.start();
+      if (!this.container.running) {
+        this.container.start();
+      }
     });
   }
 
@@ -908,6 +921,4 @@ export class BunCompiler extends DurableObject<Cloudflare.Env> {
   }
 }
 
-export default {
-  fetch: app.fetch,
-} satisfies ExportedHandler<Cloudflare.Env>;
+export default app;
